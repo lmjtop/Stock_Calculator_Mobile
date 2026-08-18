@@ -97,6 +97,11 @@ st.markdown(
         font-weight: 800;
     }
 
+    /* 관심종목 입력칸 세로 여백 축소 */
+    div[data-testid="stTextInput"] {
+        margin-bottom: -0.35rem;
+    }
+
     </style>
     """,
     unsafe_allow_html=True
@@ -979,7 +984,7 @@ left_col, right_col = st.columns(
 
 
 # ============================================================
-# 왼쪽 관심종목
+# 왼쪽 관심종목 - 모바일 압축형
 # ============================================================
 
 with left_col:
@@ -989,7 +994,9 @@ with left_col:
     )
 
     # --------------------------------------------------------
-    # 관심종목 10개
+    # 관심종목 5개 - 2줄 압축형
+    # 1줄: 체크박스 + 종목코드
+    # 2줄: 종목명 + 현재가격
     # --------------------------------------------------------
 
     for i in range(
@@ -1003,67 +1010,62 @@ with left_col:
             ][i]
         )
 
+        # ----------------------------------------------------
+        # 1행 : 체크박스 + 종목코드
+        # ----------------------------------------------------
 
-        with st.container(
-            border=True
-        ):
+        col_check, col_code = st.columns(
+            [0.12, 0.88],
+            gap="small"
+        )
 
-            top1, top2 = (
-                st.columns(
-                    [0.18, 0.82]
-                )
+        with col_check:
+
+            selected = st.checkbox(
+                "",
+                value=stock.get(
+                    "selected",
+                    False
+                ),
+                key=f"select_{i}",
+                label_visibility="collapsed"
             )
 
+            stock[
+                "selected"
+            ] = selected
 
-            # ------------------------------------------------
-            # 체크박스
-            # ------------------------------------------------
+        with col_code:
 
-            with top1:
+            code = st.text_input(
+                f"{i + 1}. 종목코드",
+                value=stock.get(
+                    "code",
+                    ""
+                ),
+                key=f"quick_code_{i}",
+                label_visibility="collapsed",
+                placeholder=f"{i + 1}. 종목코드"
+            )
 
-                selected = st.checkbox(
-                    "",
-                    value=stock.get(
-                        "selected",
-                        False
-                    ),
-                    key=f"select_{i}"
-                )
+            stock[
+                "code"
+            ] = (
+                code
+                .strip()
+                .upper()
+            )
 
+        # ----------------------------------------------------
+        # 2행 : 종목명 + 현재가격
+        # ----------------------------------------------------
 
-                stock[
-                    "selected"
-                ] = selected
+        col_name, col_price = st.columns(
+            [0.62, 0.38],
+            gap="small"
+        )
 
-
-            # ------------------------------------------------
-            # 종목코드
-            # ------------------------------------------------
-
-            with top2:
-
-                code = st.text_input(
-                    f"{i + 1}. 종목코드",
-                    value=stock.get(
-                        "code",
-                        ""
-                    ),
-                    key=f"quick_code_{i}"
-                )
-
-
-                stock[
-                    "code"
-                ] = (
-                    code
-                    .strip()
-                    .upper()
-                )
-
-
-            # ------------------------------------------------
-            # 종목명
-            # ------------------------------------------------
+        with col_name:
 
             stock_name = (
                 stock.get(
@@ -1072,23 +1074,29 @@ with left_col:
                 )
             )
 
-
             if stock_name:
 
                 st.markdown(
-                    f"**{stock_name}**"
+                    f"<div style='font-size:15px;"
+                    f"font-weight:700;"
+                    f"padding-top:1px;'>"
+                    f"{stock_name}"
+                    f"</div>",
+                    unsafe_allow_html=True
                 )
 
             else:
 
-                st.caption(
-                    "종목코드 입력 후 현재가 조회"
+                st.markdown(
+                    "<div style='font-size:12px;"
+                    "color:#888888;"
+                    "padding-top:2px;'>"
+                    "종목코드 입력"
+                    "</div>",
+                    unsafe_allow_html=True
                 )
 
-
-            # ------------------------------------------------
-            # 현재가격 - 읽기 전용 표시
-            # ------------------------------------------------
+        with col_price:
 
             current_price = to_number(
                 stock.get(
@@ -1097,22 +1105,39 @@ with left_col:
                 )
             )
 
-
             if current_price > 0:
 
-                st.metric(
-                    "현재가격",
-                    format_number(
-                        current_price
-                    )
+                st.markdown(
+                    f"<div style='text-align:right;"
+                    f"font-weight:800;"
+                    f"font-size:16px;"
+                    f"padding-top:1px;'>"
+                    f"{format_number(current_price)}"
+                    f"</div>",
+                    unsafe_allow_html=True
                 )
 
             else:
 
-                st.metric(
-                    "현재가격",
+                st.markdown(
+                    "<div style='text-align:right;"
+                    "font-size:15px;"
+                    "padding-top:1px;'>"
                     "-"
+                    "</div>",
+                    unsafe_allow_html=True
                 )
+
+        # ----------------------------------------------------
+        # 얇은 구분선
+        # ----------------------------------------------------
+
+        st.markdown(
+            "<hr style='margin:2px 0 7px 0;"
+            "border:none;"
+            "border-top:1px solid #e6e6e6;'>",
+            unsafe_allow_html=True
+        )
 
 
 # ============================================================
