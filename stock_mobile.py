@@ -981,10 +981,9 @@ with left_col:
             "관심종목을 조회하고 있습니다..."
         ):
 
-            success = (
-                refresh_quick_stocks()
+            success, failed_codes = (
+                 refresh_quick_stocks()
             )
-
 
         if success == 0:
 
