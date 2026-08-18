@@ -706,25 +706,35 @@ def refresh_account(
 
 def refresh_all():
 
-    success = 0
+    total_success = 0
+    failed_codes = []
+
+    # --------------------------------------------------------
+    # 관심종목 조회
+    # --------------------------------------------------------
+
+    quick_success, quick_failed = refresh_quick_stocks()
+
+    total_success += quick_success
+    failed_codes.extend(quick_failed)
 
 
-    success += (
-        refresh_quick_stocks()
-    )
-
+    # --------------------------------------------------------
+    # 4개 계좌 조회
+    # --------------------------------------------------------
 
     for account in ACCOUNTS:
 
-        success += (
-            refresh_account(
-                account
-            )
+        account_success = refresh_account(
+            account
         )
 
+        total_success += account_success
 
-    return success
 
+    save_data()
+
+    return total_success, failed_codes
 
 # ============================================================
 # 선택 종목 계좌 추가
@@ -931,7 +941,7 @@ if st.button(
         "현재가를 조회하고 있습니다..."
     ):
 
-        success = refresh_all()
+        success, failed_codes = refresh_all()
 
 
     if success > 0:
@@ -940,15 +950,23 @@ if st.button(
             f"{success}개 종목의 현재가를 갱신했습니다."
         )
 
-    else:
 
-        st.error(
-            "현재가 조회에 실패했습니다."
+    if failed_codes:
+
+        st.warning(
+            "조회 실패 종목: "
+            + ", ".join(failed_codes)
+        )
+
+
+    if success == 0 and not failed_codes:
+
+        st.warning(
+            "조회할 종목이 없습니다."
         )
 
 
     st.rerun()
-
 
 # ============================================================
 # PC 좌우 배치
