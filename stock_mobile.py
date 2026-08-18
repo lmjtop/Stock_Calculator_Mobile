@@ -578,27 +578,40 @@ if "portfolio" not in st.session_state:
 def refresh_quick_stocks():
 
     success = 0
+    failed_codes = []
 
+    for i in range(QUICK_STOCKS):
 
-    for stock in (
-        st.session_state
-        .portfolio[
-            "quick_stocks"
-        ]
-    ):
+        # Streamlit 입력창에서 현재 값을 직접 가져옴
+        widget_key = f"quick_code_{i}"
 
-        code = (
-            stock.get(
-                "code",
-                ""
+        if widget_key in st.session_state:
+
+            code = (
+                st.session_state[widget_key]
+                .strip()
+                .upper()
             )
-            .strip()
-            .upper()
-        )
+
+        else:
+
+            code = (
+                st.session_state
+                .portfolio["quick_stocks"][i]
+                .get("code", "")
+                .strip()
+                .upper()
+            )
 
 
         if not code:
             continue
+
+
+        # portfolio에도 최신 코드 저장
+        st.session_state.portfolio[
+            "quick_stocks"
+        ][i]["code"] = code
 
 
         result = get_stock_price(
@@ -608,23 +621,26 @@ def refresh_quick_stocks():
 
         if result:
 
-            stock["code"] = code
+            st.session_state.portfolio[
+                "quick_stocks"
+            ][i]["name"] = result["name"]
 
-            stock["name"] = (
-                result["name"]
-            )
-
-            stock["price"] = (
-                result["price"]
-            )
+            st.session_state.portfolio[
+                "quick_stocks"
+            ][i]["price"] = result["price"]
 
             success += 1
+
+        else:
+
+            failed_codes.append(
+                code
+            )
 
 
     save_data()
 
-    return success
-
+    return success, failed_codes
 
 # ============================================================
 # 계좌 현재가 조회
