@@ -8,7 +8,7 @@ import os
 # 기본 설정
 # ============================================================
 
-QUICK_STOCKS = 10
+QUICK_STOCKS = 5
 ACCOUNT_STOCKS = 5
 
 ACCOUNTS = [
