@@ -988,35 +988,6 @@ with left_col:
         "관심 종목"
     )
 
-
-    if st.button(
-        "🔄 관심종목 현재가 조회",
-        key="quick_refresh",
-        use_container_width=True
-    ):
-
-        with st.spinner(
-            "관심종목을 조회하고 있습니다..."
-        ):
-
-            success, failed_codes = (
-                 refresh_quick_stocks()
-            )
-
-        if success > 0:
-
-           st.success(
-               f"{success}개 종목의 현재가를 조회했습니다."
-           )
-
-        if failed_codes:
-
-           st.error(
-              "조회 실패 종목: "
-              + ", ".join(failed_codes)
-           )
-
-
         st.rerun()
 
 
