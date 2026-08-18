@@ -9,7 +9,8 @@ import os
 # ============================================================
 
 QUICK_STOCKS = 5
-ACCOUNT_STOCKS = 5
+ACCOUNT_STOCKS = 4
+CASH_SLOT_NO = 5
 
 ACCOUNTS = [
     "퇴직연금DC형",
@@ -59,12 +60,12 @@ st.markdown(
     }
 
     .stock-name {
-        font-size: 17px;
+        font-size: 15px;
         font-weight: 700;
     }
 
     .stock-price {
-        font-size: 18px;
+        font-size: 16px;
         font-weight: 700;
         text-align: right;
     }
@@ -97,9 +98,12 @@ st.markdown(
         font-weight: 800;
     }
 
-    /* 관심종목 입력칸 세로 여백 축소 */
     div[data-testid="stTextInput"] {
         margin-bottom: -0.35rem;
+    }
+
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        margin-bottom: 0.35rem;
     }
 
     </style>
@@ -234,7 +238,6 @@ def get_domestic_stock(stock_code):
     if not data:
         return None
 
-
     stock_name = data.get(
         "stockName"
     )
@@ -243,15 +246,12 @@ def get_domestic_stock(stock_code):
         "closePrice"
     )
 
-
     if not stock_name or close_price is None:
         return None
-
 
     price = to_number(
         close_price
     )
-
 
     return {
         "code": stock_code,
@@ -272,14 +272,11 @@ def get_overseas_stock(ticker):
         .upper()
     )
 
-
-    # 네이버 내부 Reuters 코드 후보
     reuters_codes = [
         f"{ticker}.O",
         f"{ticker}.N",
         f"{ticker}.A"
     ]
-
 
     for reuters_code in reuters_codes:
 
@@ -290,10 +287,8 @@ def get_overseas_stock(ticker):
 
         data = request_json(url)
 
-
         if not data:
             continue
-
 
         stock_name = (
             data.get("stockName")
@@ -301,29 +296,24 @@ def get_overseas_stock(ticker):
             or data.get("stockNameEng")
         )
 
-
         price_value = (
             data.get("closePrice")
             or data.get("regularMarketPrice")
             or data.get("currentPrice")
         )
 
-
         if not stock_name or price_value is None:
             continue
-
 
         price = to_number(
             price_value
         )
-
 
         return {
             "code": ticker,
             "name": stock_name,
             "price": price
         }
-
 
     return None
 
@@ -340,15 +330,10 @@ def get_stock_price(stock_code):
         .upper()
     )
 
-
     if code == "":
         return None
 
-
-    # --------------------------------------------------------
-    # 국내 6자리 종목 우선
-    # --------------------------------------------------------
-
+    # 국내주식
     if len(code) == 6:
 
         result = get_domestic_stock(
@@ -358,11 +343,7 @@ def get_stock_price(stock_code):
         if result:
             return result
 
-
-    # --------------------------------------------------------
-    # 영문 포함 → 미국종목 조회
-    # --------------------------------------------------------
-
+    # 영문 포함 → 미국주식
     if any(
         c.isalpha()
         for c in code
@@ -374,11 +355,6 @@ def get_stock_price(stock_code):
 
         if result:
             return result
-
-
-    # --------------------------------------------------------
-    # 마지막 국내 재시도
-    # --------------------------------------------------------
 
     return get_domestic_stock(
         code
@@ -405,7 +381,6 @@ def make_default_data():
             for _ in range(
                 QUICK_STOCKS
             )
-
         ],
 
         "accounts": {
@@ -423,8 +398,14 @@ def make_default_data():
                 for _ in range(
                     ACCOUNT_STOCKS
                 )
-
             ]
+
+            for account in ACCOUNTS
+        },
+
+        "cash_balances": {
+
+            account: ""
 
             for account in ACCOUNTS
         }
@@ -443,7 +424,6 @@ def load_data():
 
         return make_default_data()
 
-
     try:
 
         with open(
@@ -456,9 +436,7 @@ def load_data():
                 file
             )
 
-
         default = make_default_data()
-
 
         # ----------------------------------------------------
         # 관심종목
@@ -468,7 +446,6 @@ def load_data():
             "quick_stocks",
             []
         )
-
 
         while len(quick) < QUICK_STOCKS:
 
@@ -481,16 +458,14 @@ def load_data():
                 }
             )
 
-
         default[
             "quick_stocks"
         ] = quick[
             :QUICK_STOCKS
         ]
 
-
         # ----------------------------------------------------
-        # 계좌
+        # 계좌 종목
         # ----------------------------------------------------
 
         saved_accounts = data.get(
@@ -498,14 +473,12 @@ def load_data():
             {}
         )
 
-
         for account in ACCOUNTS:
 
             rows = saved_accounts.get(
                 account,
                 []
             )
-
 
             while len(rows) < ACCOUNT_STOCKS:
 
@@ -519,18 +492,33 @@ def load_data():
                     }
                 )
 
-
             default[
                 "accounts"
-            ][account] = (
-                rows[
-                    :ACCOUNT_STOCKS
-                ]
+            ][account] = rows[
+                :ACCOUNT_STOCKS
+            ]
+
+        # ----------------------------------------------------
+        # 현금잔고
+        # ----------------------------------------------------
+
+        saved_cash_balances = data.get(
+            "cash_balances",
+            {}
+        )
+
+        for account in ACCOUNTS:
+
+            default[
+                "cash_balances"
+            ][account] = str(
+                saved_cash_balances.get(
+                    account,
+                    ""
+                )
             )
 
-
         return default
-
 
     except:
 
@@ -577,7 +565,7 @@ if "portfolio" not in st.session_state:
 
 
 # ============================================================
-# 관심종목 전체 조회
+# 관심종목 조회
 # ============================================================
 
 def refresh_quick_stocks():
@@ -585,15 +573,20 @@ def refresh_quick_stocks():
     success = 0
     failed_codes = []
 
-    for i in range(QUICK_STOCKS):
+    for i in range(
+        QUICK_STOCKS
+    ):
 
-        # Streamlit 입력창에서 현재 값을 직접 가져옴
-        widget_key = f"quick_code_{i}"
+        widget_key = (
+            f"quick_code_{i}"
+        )
 
         if widget_key in st.session_state:
 
             code = (
-                st.session_state[widget_key]
+                st.session_state[
+                    widget_key
+                ]
                 .strip()
                 .upper()
             )
@@ -602,37 +595,41 @@ def refresh_quick_stocks():
 
             code = (
                 st.session_state
-                .portfolio["quick_stocks"][i]
-                .get("code", "")
+                .portfolio[
+                    "quick_stocks"
+                ][i]
+                .get(
+                    "code",
+                    ""
+                )
                 .strip()
                 .upper()
             )
 
-
         if not code:
             continue
 
-
-        # portfolio에도 최신 코드 저장
         st.session_state.portfolio[
             "quick_stocks"
         ][i]["code"] = code
-
 
         result = get_stock_price(
             code
         )
 
-
         if result:
 
             st.session_state.portfolio[
                 "quick_stocks"
-            ][i]["name"] = result["name"]
+            ][i]["name"] = result[
+                "name"
+            ]
 
             st.session_state.portfolio[
                 "quick_stocks"
-            ][i]["price"] = result["price"]
+            ][i]["price"] = result[
+                "price"
+            ]
 
             success += 1
 
@@ -642,21 +639,18 @@ def refresh_quick_stocks():
                 code
             )
 
-
     save_data()
 
     return success, failed_codes
+
 
 # ============================================================
 # 계좌 현재가 조회
 # ============================================================
 
-def refresh_account(
-    account
-):
+def refresh_account(account):
 
     success = 0
-
 
     rows = (
         st.session_state
@@ -664,7 +658,6 @@ def refresh_account(
             "accounts"
         ][account]
     )
-
 
     for row in rows:
 
@@ -677,15 +670,12 @@ def refresh_account(
             .upper()
         )
 
-
         if not code:
             continue
-
 
         result = get_stock_price(
             code
         )
-
 
         if result:
 
@@ -695,10 +685,11 @@ def refresh_account(
 
             row[
                 "current_price"
-            ] = result["price"]
+            ] = result[
+                "price"
+            ]
 
             success += 1
-
 
     save_data()
 
@@ -714,32 +705,37 @@ def refresh_all():
     total_success = 0
     failed_codes = []
 
-    # --------------------------------------------------------
-    # 관심종목 조회
-    # --------------------------------------------------------
+    quick_success, quick_failed = (
+        refresh_quick_stocks()
+    )
 
-    quick_success, quick_failed = refresh_quick_stocks()
+    total_success += (
+        quick_success
+    )
 
-    total_success += quick_success
-    failed_codes.extend(quick_failed)
-
-
-    # --------------------------------------------------------
-    # 4개 계좌 조회
-    # --------------------------------------------------------
+    failed_codes.extend(
+        quick_failed
+    )
 
     for account in ACCOUNTS:
 
-        account_success = refresh_account(
-            account
+        account_success = (
+            refresh_account(
+                account
+            )
         )
 
-        total_success += account_success
-
+        total_success += (
+            account_success
+        )
 
     save_data()
 
-    return total_success, failed_codes
+    return (
+        total_success,
+        failed_codes
+    )
+
 
 # ============================================================
 # 선택 종목 계좌 추가
@@ -756,14 +752,12 @@ def add_selected_to_account(
         ]
     )
 
-
     account_rows = (
         st.session_state
         .portfolio[
             "accounts"
         ][account]
     )
-
 
     selected = [
 
@@ -777,7 +771,6 @@ def add_selected_to_account(
         )
     ]
 
-
     if not selected:
 
         st.warning(
@@ -786,46 +779,32 @@ def add_selected_to_account(
 
         return
 
-
     for stock in selected:
 
-
-        code = (
-            stock.get(
-                "code",
-                ""
-            )
+        code = stock.get(
+            "code",
+            ""
         )
-
 
         if not code:
             continue
 
-
-        # ----------------------------------------------------
         # 중복 체크
-        # ----------------------------------------------------
-
         exists = any(
 
-            row.get("code")
-            == code
+            row.get(
+                "code"
+            ) == code
 
             for row
             in account_rows
         )
 
-
         if exists:
             continue
 
-
-        # ----------------------------------------------------
         # 빈 행 찾기
-        # ----------------------------------------------------
-
         empty_index = None
-
 
         for i, row in enumerate(
             account_rows
@@ -838,20 +817,15 @@ def add_selected_to_account(
                 empty_index = i
                 break
 
-
         if empty_index is None:
 
             st.warning(
-                f"{account}은 최대 "
-                f"{ACCOUNT_STOCKS}개 종목까지 가능합니다."
+                f"{account}은 종목을 최대 "
+                f"{ACCOUNT_STOCKS}개까지 넣을 수 있습니다. "
+                f"{CASH_SLOT_NO}번째 칸은 현금잔고 전용입니다."
             )
 
             break
-
-
-        # ----------------------------------------------------
-        # 추가
-        # ----------------------------------------------------
 
         account_rows[
             empty_index
@@ -879,17 +853,12 @@ def add_selected_to_account(
                 )
         }
 
-
-    # --------------------------------------------------------
     # 체크 해제
-    # --------------------------------------------------------
-
     for stock in quick_stocks:
 
         stock[
             "selected"
         ] = False
-
 
     save_data()
 
@@ -914,7 +883,6 @@ def delete_account_stock(
         "current_price": 0
     }
 
-
     save_data()
 
 
@@ -926,14 +894,13 @@ st.title(
     "📊 Stock Calculator"
 )
 
-
 st.caption(
     "현재가격은 네이버 시세 조회값을 사용합니다."
 )
 
 
 # ============================================================
-# 전체 시세 조회
+# 전체 현재가 조회
 # ============================================================
 
 if st.button(
@@ -946,8 +913,9 @@ if st.button(
         "현재가를 조회하고 있습니다..."
     ):
 
-        success, failed_codes = refresh_all()
-
+        success, failed_codes = (
+            refresh_all()
+        )
 
     if success > 0:
 
@@ -955,23 +923,26 @@ if st.button(
             f"{success}개 종목의 현재가를 갱신했습니다."
         )
 
-
     if failed_codes:
 
         st.warning(
             "조회 실패 종목: "
-            + ", ".join(failed_codes)
+            + ", ".join(
+                failed_codes
+            )
         )
 
-
-    if success == 0 and not failed_codes:
+    if (
+        success == 0
+        and not failed_codes
+    ):
 
         st.warning(
             "조회할 종목이 없습니다."
         )
 
-
     st.rerun()
+
 
 # ============================================================
 # PC 좌우 배치
@@ -993,12 +964,6 @@ with left_col:
         "관심 종목"
     )
 
-    # --------------------------------------------------------
-    # 관심종목 5개 - 2줄 압축형
-    # 1줄: 체크박스 + 종목코드
-    # 2줄: 종목명 + 현재가격
-    # --------------------------------------------------------
-
     for i in range(
         QUICK_STOCKS
     ):
@@ -1011,12 +976,14 @@ with left_col:
         )
 
         # ----------------------------------------------------
-        # 1행 : 체크박스 + 종목코드
+        # 1행 : 체크 + 종목코드
         # ----------------------------------------------------
 
-        col_check, col_code = st.columns(
-            [0.12, 0.88],
-            gap="small"
+        col_check, col_code = (
+            st.columns(
+                [0.12, 0.88],
+                gap="small"
+            )
         )
 
         with col_check:
@@ -1060,9 +1027,11 @@ with left_col:
         # 2행 : 종목명 + 현재가격
         # ----------------------------------------------------
 
-        col_name, col_price = st.columns(
-            [0.62, 0.38],
-            gap="small"
+        col_name, col_price = (
+            st.columns(
+                [0.62, 0.38],
+                gap="small"
+            )
         )
 
         with col_name:
@@ -1077,7 +1046,8 @@ with left_col:
             if stock_name:
 
                 st.markdown(
-                    f"<div style='font-size:15px;"
+                    f"<div style='"
+                    f"font-size:15px;"
                     f"font-weight:700;"
                     f"padding-top:1px;'>"
                     f"{stock_name}"
@@ -1088,7 +1058,8 @@ with left_col:
             else:
 
                 st.markdown(
-                    "<div style='font-size:12px;"
+                    "<div style='"
+                    "font-size:12px;"
                     "color:#888888;"
                     "padding-top:2px;'>"
                     "종목코드 입력"
@@ -1098,17 +1069,20 @@ with left_col:
 
         with col_price:
 
-            current_price = to_number(
-                stock.get(
-                    "price",
-                    0
+            current_price = (
+                to_number(
+                    stock.get(
+                        "price",
+                        0
+                    )
                 )
             )
 
             if current_price > 0:
 
                 st.markdown(
-                    f"<div style='text-align:right;"
+                    f"<div style='"
+                    f"text-align:right;"
                     f"font-weight:800;"
                     f"font-size:16px;"
                     f"padding-top:1px;'>"
@@ -1120,7 +1094,8 @@ with left_col:
             else:
 
                 st.markdown(
-                    "<div style='text-align:right;"
+                    "<div style='"
+                    "text-align:right;"
                     "font-size:15px;"
                     "padding-top:1px;'>"
                     "-"
@@ -1128,12 +1103,9 @@ with left_col:
                     unsafe_allow_html=True
                 )
 
-        # ----------------------------------------------------
-        # 얇은 구분선
-        # ----------------------------------------------------
-
         st.markdown(
-            "<hr style='margin:2px 0 7px 0;"
+            "<hr style='"
+            "margin:2px 0 7px 0;"
             "border:none;"
             "border-top:1px solid #e6e6e6;'>",
             unsafe_allow_html=True
@@ -1150,29 +1122,28 @@ with right_col:
         "계좌 포트폴리오"
     )
 
-
     tabs = st.tabs(
         ACCOUNTS
     )
-
 
     for tab, account in zip(
         tabs,
         ACCOUNTS
     ):
 
-
         with tab:
 
+            st.caption(
+                "1~4번은 보유종목, 5번은 현금잔고입니다."
+            )
 
             # =================================================
-            # 버튼 영역
+            # 버튼
             # =================================================
 
             button1, button2 = (
                 st.columns(2)
             )
-
 
             with button1:
 
@@ -1187,7 +1158,6 @@ with right_col:
                     )
 
                     st.rerun()
-
 
             with button2:
 
@@ -1205,18 +1175,14 @@ with right_col:
                             account
                         )
 
-
                     st.rerun()
 
-
             # =================================================
-            # 합계 변수
+            # 합계
             # =================================================
 
             total_buy = 0
-
             total_evaluation = 0
-
 
             rows = (
                 st.session_state
@@ -1225,9 +1191,8 @@ with right_col:
                 ][account]
             )
 
-
             # =================================================
-            # 계좌당 5개 종목
+            # 1~4번 주식
             # =================================================
 
             for i in range(
@@ -1236,15 +1201,9 @@ with right_col:
 
                 row = rows[i]
 
-
                 with st.container(
                     border=True
                 ):
-
-
-                    # -----------------------------------------
-                    # 종목명 / 삭제
-                    # -----------------------------------------
 
                     title_col, delete_col = (
                         st.columns(
@@ -1252,6 +1211,9 @@ with right_col:
                         )
                     )
 
+                    # -----------------------------------------
+                    # 종목명
+                    # -----------------------------------------
 
                     with title_col:
 
@@ -1277,6 +1239,9 @@ with right_col:
                                 f"### {i + 1}. 빈 종목"
                             )
 
+                    # -----------------------------------------
+                    # 삭제
+                    # -----------------------------------------
 
                     with delete_col:
 
@@ -1301,20 +1266,14 @@ with right_col:
 
                                 st.rerun()
 
-
-                    # -----------------------------------------
-                    # 빈 종목이면 계산 영역 생략
-                    # -----------------------------------------
-
                     if not row.get(
                         "code"
                     ):
 
                         continue
 
-
                     # -----------------------------------------
-                    # 매수단가 / 수량
+                    # 매수단가 / 수량 / 현재가격
                     # -----------------------------------------
 
                     c1, c2, c3 = (
@@ -1322,7 +1281,6 @@ with right_col:
                             [1, 1, 1]
                         )
                     )
-
 
                     with c1:
 
@@ -1343,7 +1301,6 @@ with right_col:
                             )
                         )
 
-
                     with c2:
 
                         quantity_text = (
@@ -1363,11 +1320,6 @@ with right_col:
                             )
                         )
 
-
-                    # -----------------------------------------
-                    # 현재가격은 입력칸 없이 표시
-                    # -----------------------------------------
-
                     with c3:
 
                         current_price = (
@@ -1378,7 +1330,6 @@ with right_col:
                                 )
                             )
                         )
-
 
                         if current_price > 0:
 
@@ -1396,7 +1347,6 @@ with right_col:
                                 "-"
                             )
 
-
                     # -----------------------------------------
                     # 입력값 저장
                     # -----------------------------------------
@@ -1405,46 +1355,40 @@ with right_col:
                         "buy_price"
                     ] = buy_price_text
 
-
                     row[
                         "quantity"
                     ] = quantity_text
-
 
                     # -----------------------------------------
                     # 계산
                     # -----------------------------------------
 
-                    buy_price = to_number(
-                        buy_price_text
+                    buy_price = (
+                        to_number(
+                            buy_price_text
+                        )
                     )
 
-                    quantity = to_number(
-                        quantity_text
+                    quantity = (
+                        to_number(
+                            quantity_text
+                        )
                     )
-
 
                     buy_total = (
                         buy_price
                         * quantity
                     )
 
-
                     evaluation = (
                         current_price
                         * quantity
                     )
 
-
                     profit = (
                         evaluation
                         - buy_total
                     )
-
-
-                    # -----------------------------------------
-                    # 합계
-                    # -----------------------------------------
 
                     total_buy += (
                         buy_total
@@ -1454,15 +1398,13 @@ with right_col:
                         evaluation
                     )
 
-
                     # -----------------------------------------
-                    # 종목 계산결과
+                    # 종목 결과
                     # -----------------------------------------
 
                     r1, r2, r3 = (
                         st.columns(3)
                     )
-
 
                     r1.metric(
                         "매수총금액",
@@ -1471,14 +1413,12 @@ with right_col:
                         )
                     )
 
-
                     r2.metric(
                         "평가금액",
                         format_number(
                             evaluation
                         )
                     )
-
 
                     r3.metric(
                         "평가손익",
@@ -1489,20 +1429,80 @@ with right_col:
 
 
             # =================================================
+            # 5번째 : 현금잔고
+            # =================================================
+
+            with st.container(
+                border=True
+            ):
+
+                st.markdown(
+                    f"### {CASH_SLOT_NO}. 현금잔고"
+                )
+
+                cash_text = st.text_input(
+                    "현금잔고금액",
+                    value=str(
+                        st.session_state
+                        .portfolio[
+                            "cash_balances"
+                        ].get(
+                            account,
+                            ""
+                        )
+                    ),
+                    key=f"cash_{account}",
+                    placeholder="예: 5,000,000"
+                )
+
+                st.session_state.portfolio[
+                    "cash_balances"
+                ][account] = cash_text
+
+                cash_balance = (
+                    to_number(
+                        cash_text
+                    )
+                )
+
+                st.metric(
+                    "현재 현금잔고",
+                    format_number(
+                        cash_balance
+                    )
+                    if cash_balance > 0
+                    else "0"
+                )
+
+
+            # =================================================
             # 계좌 전체 합계
             # =================================================
 
-            total_profit = (
+            # 주식 평가금액 + 현금
+            total_evaluation_with_cash = (
                 total_evaluation
-                - total_buy
+                + cash_balance
             )
 
+            # 수익률 계산 기준금액
+            # 주식 매수금액 + 현금
+            total_base = (
+                total_buy
+                + cash_balance
+            )
 
-            if total_buy > 0:
+            # 현금 자체는 손익 0원
+            total_profit = (
+                total_evaluation_with_cash
+                - total_base
+            )
+
+            if total_base > 0:
 
                 total_rate = (
                     total_profit
-                    / total_buy
+                    / total_base
                     * 100
                 )
 
@@ -1511,29 +1511,30 @@ with right_col:
                 total_rate = 0
 
 
+            # =================================================
+            # 계좌 합계 표시
+            # =================================================
+
             st.markdown(
                 "## 계좌 합계"
             )
-
 
             s1, s2, s3, s4 = (
                 st.columns(4)
             )
 
-
             # ------------------------------------------------
-            # 매수총금액 합
+            # 주식 매수총금액
             # ------------------------------------------------
 
             with s1:
 
                 st.markdown(
                     '<div class="summary-title">'
-                    '매수총금액 합'
+                    '매수총금액 합(주식)'
                     '</div>',
                     unsafe_allow_html=True
                 )
-
 
                 st.markdown(
                     f'<div class="summary-value">'
@@ -1542,9 +1543,8 @@ with right_col:
                     unsafe_allow_html=True
                 )
 
-
             # ------------------------------------------------
-            # 현재평가금액 합
+            # 현재평가금액 + 현금
             # ------------------------------------------------
 
             with s2:
@@ -1556,14 +1556,12 @@ with right_col:
                     unsafe_allow_html=True
                 )
 
-
                 st.markdown(
                     f'<div class="summary-value">'
-                    f'{format_number(total_evaluation)}'
+                    f'{format_number(total_evaluation_with_cash)}'
                     f'</div>',
                     unsafe_allow_html=True
                 )
-
 
             # ------------------------------------------------
             # 손익 색상
@@ -1587,9 +1585,8 @@ with right_col:
                     "profit-zero"
                 )
 
-
             # ------------------------------------------------
-            # 현재손익 합
+            # 현재손익
             # ------------------------------------------------
 
             with s3:
@@ -1601,14 +1598,12 @@ with right_col:
                     unsafe_allow_html=True
                 )
 
-
                 st.markdown(
                     f'<div class="{color_class}">'
                     f'{format_profit(total_profit)}'
                     f'</div>',
                     unsafe_allow_html=True
                 )
-
 
             # ------------------------------------------------
             # 전체 수익률
@@ -1622,7 +1617,6 @@ with right_col:
                     '</div>',
                     unsafe_allow_html=True
                 )
-
 
                 st.markdown(
                     f'<div class="{color_class}">'
