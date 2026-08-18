@@ -985,11 +985,18 @@ with left_col:
                  refresh_quick_stocks()
             )
 
-        if success == 0:
+        if success > 0:
 
-            st.warning(
-                "현재가 조회에 실패했습니다."
-            )
+           st.success(
+               f"{success}개 종목의 현재가를 조회했습니다."
+           )
+
+        if failed_codes:
+
+           st.error(
+              "조회 실패 종목: "
+              + ", ".join(failed_codes)
+           )
 
 
         st.rerun()
