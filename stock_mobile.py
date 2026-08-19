@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import json
 import os
+from streamlit_local_storage import LocalStorage
 
 
 # ============================================================
@@ -19,15 +20,21 @@ ACCOUNTS = [
     "연금저축"
 ]
 
-
 BASE_DIR = os.path.dirname(
     os.path.abspath(__file__)
 )
 
+# 서버측 보조 백업 파일
 SAVE_FILE = os.path.join(
     BASE_DIR,
     "portfolio_mobile.json"
 )
+
+# Safari / Chrome 브라우저 LocalStorage Key
+LOCAL_STORAGE_KEY = "stock_calculator_portfolio_v1"
+
+# LocalStorage 정상 동작 확인용 Key
+LOCAL_STORAGE_READY_KEY = "stock_calculator_storage_ready"
 
 
 # ============================================================
@@ -40,6 +47,13 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
+
+
+# ============================================================
+# 브라우저 LocalStorage
+# ============================================================
+
+local_storage = LocalStorage()
 
 
 # ============================================================
@@ -413,10 +427,126 @@ def make_default_data():
 
 
 # ============================================================
-# 데이터 불러오기
+# 데이터 구조 보정
+# 예전 저장 데이터가 있어도 현재 구조에 맞게 변환
 # ============================================================
 
-def load_data():
+def normalize_data(data):
+
+    default = make_default_data()
+
+    if not isinstance(data, dict):
+        return default
+
+    # --------------------------------------------------------
+    # 관심종목
+    # --------------------------------------------------------
+
+    quick = data.get(
+        "quick_stocks",
+        []
+    )
+
+    if not isinstance(quick, list):
+        quick = []
+
+    while len(quick) < QUICK_STOCKS:
+
+        quick.append(
+            {
+                "code": "",
+                "name": "",
+                "price": 0,
+                "selected": False
+            }
+        )
+
+    default[
+        "quick_stocks"
+    ] = quick[
+        :QUICK_STOCKS
+    ]
+
+    # --------------------------------------------------------
+    # 계좌
+    # --------------------------------------------------------
+
+    saved_accounts = data.get(
+        "accounts",
+        {}
+    )
+
+    if not isinstance(
+        saved_accounts,
+        dict
+    ):
+        saved_accounts = {}
+
+    for account in ACCOUNTS:
+
+        rows = saved_accounts.get(
+            account,
+            []
+        )
+
+        if not isinstance(
+            rows,
+            list
+        ):
+            rows = []
+
+        while len(rows) < ACCOUNT_STOCKS:
+
+            rows.append(
+                {
+                    "code": "",
+                    "name": "",
+                    "buy_price": "",
+                    "quantity": "",
+                    "current_price": 0
+                }
+            )
+
+        default[
+            "accounts"
+        ][account] = rows[
+            :ACCOUNT_STOCKS
+        ]
+
+    # --------------------------------------------------------
+    # 현금잔고
+    # --------------------------------------------------------
+
+    saved_cash = data.get(
+        "cash_balances",
+        {}
+    )
+
+    if not isinstance(
+        saved_cash,
+        dict
+    ):
+        saved_cash = {}
+
+    for account in ACCOUNTS:
+
+        default[
+            "cash_balances"
+        ][account] = str(
+            saved_cash.get(
+                account,
+                ""
+            )
+        )
+
+    return default
+
+
+# ============================================================
+# 서버 JSON 백업 불러오기
+# ============================================================
+
+def load_server_data():
 
     if not os.path.exists(
         SAVE_FILE
@@ -436,89 +566,9 @@ def load_data():
                 file
             )
 
-        default = make_default_data()
-
-        # ----------------------------------------------------
-        # 관심종목
-        # ----------------------------------------------------
-
-        quick = data.get(
-            "quick_stocks",
-            []
+        return normalize_data(
+            data
         )
-
-        while len(quick) < QUICK_STOCKS:
-
-            quick.append(
-                {
-                    "code": "",
-                    "name": "",
-                    "price": 0,
-                    "selected": False
-                }
-            )
-
-        default[
-            "quick_stocks"
-        ] = quick[
-            :QUICK_STOCKS
-        ]
-
-        # ----------------------------------------------------
-        # 계좌 종목
-        # ----------------------------------------------------
-
-        saved_accounts = data.get(
-            "accounts",
-            {}
-        )
-
-        for account in ACCOUNTS:
-
-            rows = saved_accounts.get(
-                account,
-                []
-            )
-
-            while len(rows) < ACCOUNT_STOCKS:
-
-                rows.append(
-                    {
-                        "code": "",
-                        "name": "",
-                        "buy_price": "",
-                        "quantity": "",
-                        "current_price": 0
-                    }
-                )
-
-            default[
-                "accounts"
-            ][account] = rows[
-                :ACCOUNT_STOCKS
-            ]
-
-        # ----------------------------------------------------
-        # 현금잔고
-        # ----------------------------------------------------
-
-        saved_cash_balances = data.get(
-            "cash_balances",
-            {}
-        )
-
-        for account in ACCOUNTS:
-
-            default[
-                "cash_balances"
-            ][account] = str(
-                saved_cash_balances.get(
-                    account,
-                    ""
-                )
-            )
-
-        return default
 
     except:
 
@@ -526,10 +576,10 @@ def load_data():
 
 
 # ============================================================
-# 저장
+# 서버 JSON 보조 저장
 # ============================================================
 
-def save_data():
+def save_server_data():
 
     try:
 
@@ -546,22 +596,144 @@ def save_data():
                 indent=4
             )
 
-    except Exception as e:
-
-        st.error(
-            f"데이터 저장 오류: {e}"
-        )
+    except:
+        pass
 
 
 # ============================================================
-# Session 초기화
+# 브라우저 저장
+# ============================================================
+
+def save_browser_data():
+
+    try:
+
+        save_text = json.dumps(
+            st.session_state.portfolio,
+            ensure_ascii=False
+        )
+
+        local_storage.setItem(
+            LOCAL_STORAGE_KEY,
+            save_text,
+            key="portfolio_browser_save"
+        )
+
+    except Exception:
+        pass
+
+
+# ============================================================
+# 통합 저장
+# ============================================================
+
+def save_data():
+
+    save_server_data()
+    save_browser_data()
+
+
+# ============================================================
+# 브라우저 LocalStorage 준비 확인
+# ============================================================
+
+storage_ready = local_storage.getItem(
+    LOCAL_STORAGE_READY_KEY,
+    key="storage_ready_check"
+)
+
+if storage_ready != "OK":
+
+    local_storage.setItem(
+        LOCAL_STORAGE_READY_KEY,
+        "OK",
+        key="storage_ready_set"
+    )
+
+
+# ============================================================
+# 최초 Session 초기화
 # ============================================================
 
 if "portfolio" not in st.session_state:
 
+    # 우선 서버측 백업을 임시로 불러옴
     st.session_state.portfolio = (
-        load_data()
+        load_server_data()
     )
+
+    st.session_state.browser_data_loaded = False
+
+
+# ============================================================
+# Safari LocalStorage 데이터 최초 복원
+# ============================================================
+
+browser_data = local_storage.getItem(
+    LOCAL_STORAGE_KEY,
+    key="portfolio_browser_load"
+)
+
+
+if (
+    not st.session_state.get(
+        "browser_data_loaded",
+        False
+    )
+):
+
+    # --------------------------------------------------------
+    # 브라우저에 저장된 값이 있는 경우
+    # --------------------------------------------------------
+
+    if browser_data:
+
+        try:
+
+            if isinstance(
+                browser_data,
+                str
+            ):
+
+                loaded_data = json.loads(
+                    browser_data
+                )
+
+            else:
+
+                loaded_data = browser_data
+
+            st.session_state.portfolio = (
+                normalize_data(
+                    loaded_data
+                )
+            )
+
+            st.session_state[
+                "browser_data_loaded"
+            ] = True
+
+            # 브라우저 값을 서버에도 백업
+            save_server_data()
+
+        except:
+
+            st.session_state[
+                "browser_data_loaded"
+            ] = True
+
+    # --------------------------------------------------------
+    # LocalStorage가 아직 로딩되지 않은 첫 실행
+    # 한 번 더 실행될 시간을 줌
+    # --------------------------------------------------------
+
+    elif (
+        storage_ready == "OK"
+    ):
+
+        st.session_state[
+            "browser_data_loaded"
+        ] = True
 
 
 # ============================================================
@@ -887,6 +1059,56 @@ def delete_account_stock(
 
 
 # ============================================================
+# 전체 데이터 초기화
+# ============================================================
+
+def reset_all_data():
+
+    st.session_state.portfolio = (
+        make_default_data()
+    )
+
+    # 위젯 session_state도 제거
+    delete_keys = []
+
+    for key in st.session_state.keys():
+
+        if (
+            key.startswith("quick_code_")
+            or key.startswith("select_")
+            or key.startswith("buy_")
+            or key.startswith("qty_")
+            or key.startswith("cash_")
+        ):
+
+            delete_keys.append(
+                key
+            )
+
+    for key in delete_keys:
+
+        del st.session_state[
+            key
+        ]
+
+    save_server_data()
+
+    try:
+
+        local_storage.setItem(
+            LOCAL_STORAGE_KEY,
+            json.dumps(
+                make_default_data(),
+                ensure_ascii=False
+            ),
+            key="portfolio_browser_reset"
+        )
+
+    except:
+        pass
+
+
+# ============================================================
 # 제목
 # ============================================================
 
@@ -900,48 +1122,111 @@ st.caption(
 
 
 # ============================================================
-# 전체 현재가 조회
+# 전체 현재가 조회 / 초기화
 # ============================================================
 
-if st.button(
-    "🔄 전체 현재가 조회",
-    use_container_width=True,
-    type="primary"
+top1, top2 = st.columns(
+    [0.78, 0.22]
+)
+
+with top1:
+
+    if st.button(
+        "🔄 전체 현재가 조회",
+        use_container_width=True,
+        type="primary"
+    ):
+
+        with st.spinner(
+            "현재가를 조회하고 있습니다..."
+        ):
+
+            success, failed_codes = (
+                refresh_all()
+            )
+
+        if success > 0:
+
+            st.success(
+                f"{success}개 종목의 현재가를 갱신했습니다."
+            )
+
+        if failed_codes:
+
+            st.warning(
+                "조회 실패 종목: "
+                + ", ".join(
+                    failed_codes
+                )
+            )
+
+        if (
+            success == 0
+            and not failed_codes
+        ):
+
+            st.warning(
+                "조회할 종목이 없습니다."
+            )
+
+        st.rerun()
+
+
+with top2:
+
+    if st.button(
+        "🗑️ 전체 초기화",
+        use_container_width=True
+    ):
+
+        st.session_state[
+            "show_reset_confirm"
+        ] = True
+
+
+# ============================================================
+# 초기화 확인
+# ============================================================
+
+if st.session_state.get(
+    "show_reset_confirm",
+    False
 ):
 
-    with st.spinner(
-        "현재가를 조회하고 있습니다..."
-    ):
+    st.warning(
+        "관심종목, 계좌종목, 매수단가, 수량, 현금잔고가 모두 삭제됩니다."
+    )
 
-        success, failed_codes = (
-            refresh_all()
-        )
+    rc1, rc2 = st.columns(2)
 
-    if success > 0:
+    with rc1:
 
-        st.success(
-            f"{success}개 종목의 현재가를 갱신했습니다."
-        )
+        if st.button(
+            "초기화 실행",
+            use_container_width=True,
+            type="primary"
+        ):
 
-    if failed_codes:
+            reset_all_data()
 
-        st.warning(
-            "조회 실패 종목: "
-            + ", ".join(
-                failed_codes
-            )
-        )
+            st.session_state[
+                "show_reset_confirm"
+            ] = False
 
-    if (
-        success == 0
-        and not failed_codes
-    ):
+            st.rerun()
 
-        st.warning(
-            "조회할 종목이 없습니다."
-        )
+    with rc2:
 
-    st.rerun()
+        if st.button(
+            "취소",
+            use_container_width=True
+        ):
+
+            st.session_state[
+                "show_reset_confirm"
+            ] = False
+
+            st.rerun()
 
 
 # ============================================================
@@ -955,7 +1240,7 @@ left_col, right_col = st.columns(
 
 
 # ============================================================
-# 왼쪽 관심종목 - 모바일 압축형
+# 왼쪽 관심종목
 # ============================================================
 
 with left_col:
@@ -976,7 +1261,7 @@ with left_col:
         )
 
         # ----------------------------------------------------
-        # 1행 : 체크 + 종목코드
+        # 체크 + 종목코드
         # ----------------------------------------------------
 
         col_check, col_code = (
@@ -1024,7 +1309,7 @@ with left_col:
             )
 
         # ----------------------------------------------------
-        # 2행 : 종목명 + 현재가격
+        # 종목명 + 현재가격
         # ----------------------------------------------------
 
         col_name, col_price = (
@@ -1479,20 +1764,16 @@ with right_col:
             # 계좌 전체 합계
             # =================================================
 
-            # 주식 평가금액 + 현금
             total_evaluation_with_cash = (
                 total_evaluation
                 + cash_balance
             )
 
-            # 수익률 계산 기준금액
-            # 주식 매수금액 + 현금
             total_base = (
                 total_buy
                 + cash_balance
             )
 
-            # 현금 자체는 손익 0원
             total_profit = (
                 total_evaluation_with_cash
                 - total_base
@@ -1627,7 +1908,34 @@ with right_col:
 
 
 # ============================================================
-# 자동 저장
+# 변경 데이터 자동 저장
 # ============================================================
 
-save_data()
+current_save_text = json.dumps(
+    st.session_state.portfolio,
+    ensure_ascii=False,
+    sort_keys=True
+)
+
+previous_save_text = (
+    st.session_state.get(
+        "last_saved_portfolio",
+        ""
+    )
+)
+
+if (
+    st.session_state.get(
+        "browser_data_loaded",
+        False
+    )
+    and
+    current_save_text
+    != previous_save_text
+):
+
+    save_data()
+
+    st.session_state[
+        "last_saved_portfolio"
+    ] = current_save_text
