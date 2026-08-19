@@ -2,6 +2,7 @@ import streamlit as st
 import requests
 import json
 import os
+
 from streamlit_local_storage import LocalStorage
 
 
@@ -24,17 +25,16 @@ BASE_DIR = os.path.dirname(
     os.path.abspath(__file__)
 )
 
-# 서버측 보조 백업 파일
+# 서버 임시 백업용
 SAVE_FILE = os.path.join(
     BASE_DIR,
     "portfolio_mobile.json"
 )
 
-# Safari / Chrome 브라우저 LocalStorage Key
-LOCAL_STORAGE_KEY = "stock_calculator_portfolio_v1"
-
-# LocalStorage 정상 동작 확인용 Key
-LOCAL_STORAGE_READY_KEY = "stock_calculator_storage_ready"
+# 아이폰 Safari LocalStorage 저장 KEY
+LOCAL_STORAGE_KEY = (
+    "stock_calculator_portfolio_v1"
+)
 
 
 # ============================================================
@@ -50,7 +50,7 @@ st.set_page_config(
 
 
 # ============================================================
-# 브라우저 LocalStorage
+# LocalStorage
 # ============================================================
 
 local_storage = LocalStorage()
@@ -132,7 +132,8 @@ st.markdown(
 
 HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "Mozilla/5.0 "
+        "(Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 "
         "(KHTML, like Gecko) "
         "Chrome/151.0.0.0 Safari/537.36"
@@ -178,10 +179,17 @@ def format_number(value):
     if value is None:
         return ""
 
-    if float(value).is_integer():
-        return f"{int(value):,}"
+    try:
 
-    return f"{value:,.2f}"
+        value = float(value)
+
+        if value.is_integer():
+            return f"{int(value):,}"
+
+        return f"{value:,.2f}"
+
+    except:
+        return "0"
 
 
 # ============================================================
@@ -260,7 +268,10 @@ def get_domestic_stock(stock_code):
         "closePrice"
     )
 
-    if not stock_name or close_price is None:
+    if (
+        not stock_name
+        or close_price is None
+    ):
         return None
 
     price = to_number(
@@ -295,11 +306,13 @@ def get_overseas_stock(ticker):
     for reuters_code in reuters_codes:
 
         url = (
-            f"https://api.stock.naver.com/"
+            "https://api.stock.naver.com/"
             f"stock/{reuters_code}/basic"
         )
 
-        data = request_json(url)
+        data = request_json(
+            url
+        )
 
         if not data:
             continue
@@ -316,7 +329,10 @@ def get_overseas_stock(ticker):
             or data.get("currentPrice")
         )
 
-        if not stock_name or price_value is None:
+        if (
+            not stock_name
+            or price_value is None
+        ):
             continue
 
         price = to_number(
@@ -357,7 +373,7 @@ def get_stock_price(stock_code):
         if result:
             return result
 
-    # 영문 포함 → 미국주식
+    # 영문 포함 : 미국주식
     if any(
         c.isalpha()
         for c in code
@@ -427,16 +443,20 @@ def make_default_data():
 
 
 # ============================================================
-# 데이터 구조 보정
-# 예전 저장 데이터가 있어도 현재 구조에 맞게 변환
+# 저장 데이터 구조 보정
 # ============================================================
 
 def normalize_data(data):
 
     default = make_default_data()
 
-    if not isinstance(data, dict):
+    if not isinstance(
+        data,
+        dict
+    ):
+
         return default
+
 
     # --------------------------------------------------------
     # 관심종목
@@ -447,7 +467,11 @@ def normalize_data(data):
         []
     )
 
-    if not isinstance(quick, list):
+    if not isinstance(
+        quick,
+        list
+    ):
+
         quick = []
 
     while len(quick) < QUICK_STOCKS:
@@ -467,6 +491,7 @@ def normalize_data(data):
         :QUICK_STOCKS
     ]
 
+
     # --------------------------------------------------------
     # 계좌
     # --------------------------------------------------------
@@ -480,6 +505,7 @@ def normalize_data(data):
         saved_accounts,
         dict
     ):
+
         saved_accounts = {}
 
     for account in ACCOUNTS:
@@ -493,6 +519,7 @@ def normalize_data(data):
             rows,
             list
         ):
+
             rows = []
 
         while len(rows) < ACCOUNT_STOCKS:
@@ -513,6 +540,7 @@ def normalize_data(data):
             :ACCOUNT_STOCKS
         ]
 
+
     # --------------------------------------------------------
     # 현금잔고
     # --------------------------------------------------------
@@ -526,6 +554,7 @@ def normalize_data(data):
         saved_cash,
         dict
     ):
+
         saved_cash = {}
 
     for account in ACCOUNTS:
@@ -543,7 +572,7 @@ def normalize_data(data):
 
 
 # ============================================================
-# 서버 JSON 백업 불러오기
+# 서버 JSON 불러오기
 # ============================================================
 
 def load_server_data():
@@ -576,7 +605,7 @@ def load_server_data():
 
 
 # ============================================================
-# 서버 JSON 보조 저장
+# 서버 JSON 저장
 # ============================================================
 
 def save_server_data():
@@ -601,72 +630,77 @@ def save_server_data():
 
 
 # ============================================================
-# 브라우저 저장
+# 저장 요청 표시
+#
+# 브라우저 LocalStorage는 바로 쓰지 않고
+# 화면 마지막에서 딱 한 번만 저장
 # ============================================================
 
-def save_browser_data():
-
-    try:
-
-        save_text = json.dumps(
-            st.session_state.portfolio,
-            ensure_ascii=False
-        )
-
-        local_storage.setItem(
-            LOCAL_STORAGE_KEY,
-            save_text,
-            key="portfolio_browser_save"
-        )
-
-    except Exception:
-        pass
-
-
-# ============================================================
-# 통합 저장
-# ============================================================
-
-def save_data():
+def request_save():
 
     save_server_data()
-    save_browser_data()
+
+    st.session_state[
+        "browser_save_needed"
+    ] = True
 
 
 # ============================================================
-# 브라우저 LocalStorage 준비 확인
-# ============================================================
-
-storage_ready = local_storage.getItem(
-    LOCAL_STORAGE_READY_KEY,
-    key="storage_ready_check"
-)
-
-if storage_ready != "OK":
-
-    local_storage.setItem(
-        LOCAL_STORAGE_READY_KEY,
-        "OK",
-        key="storage_ready_set"
-    )
-
-
-# ============================================================
-# 최초 Session 초기화
+# Session 기본값
 # ============================================================
 
 if "portfolio" not in st.session_state:
 
-    # 우선 서버측 백업을 임시로 불러옴
     st.session_state.portfolio = (
         load_server_data()
     )
 
-    st.session_state.browser_data_loaded = False
+
+if (
+    "browser_save_needed"
+    not in st.session_state
+):
+
+    st.session_state[
+        "browser_save_needed"
+    ] = False
+
+
+if (
+    "browser_loaded"
+    not in st.session_state
+):
+
+    st.session_state[
+        "browser_loaded"
+    ] = False
+
+
+if (
+    "browser_read_count"
+    not in st.session_state
+):
+
+    st.session_state[
+        "browser_read_count"
+    ] = 0
+
+
+if (
+    "last_saved_text"
+    not in st.session_state
+):
+
+    st.session_state[
+        "last_saved_text"
+    ] = ""
 
 
 # ============================================================
-# Safari LocalStorage 데이터 최초 복원
+# Safari LocalStorage 읽기
+#
+# 중요:
+# getItem은 이 한 곳에서만 실행
 # ============================================================
 
 browser_data = local_storage.getItem(
@@ -675,15 +709,20 @@ browser_data = local_storage.getItem(
 )
 
 
-if (
-    not st.session_state.get(
-        "browser_data_loaded",
-        False
-    )
-):
+# ============================================================
+# LocalStorage 최초 복원
+# ============================================================
+
+if not st.session_state[
+    "browser_loaded"
+]:
+
+    st.session_state[
+        "browser_read_count"
+    ] += 1
 
     # --------------------------------------------------------
-    # 브라우저에 저장된 값이 있는 경우
+    # Safari에 기존 저장값이 있는 경우
     # --------------------------------------------------------
 
     if browser_data:
@@ -701,7 +740,9 @@ if (
 
             else:
 
-                loaded_data = browser_data
+                loaded_data = (
+                    browser_data
+                )
 
             st.session_state.portfolio = (
                 normalize_data(
@@ -710,30 +751,52 @@ if (
             )
 
             st.session_state[
-                "browser_data_loaded"
+                "browser_loaded"
             ] = True
 
-            # 브라우저 값을 서버에도 백업
+            current_text = json.dumps(
+                st.session_state.portfolio,
+                ensure_ascii=False,
+                sort_keys=True
+            )
+
+            st.session_state[
+                "last_saved_text"
+            ] = current_text
+
             save_server_data()
 
         except:
 
             st.session_state[
-                "browser_data_loaded"
+                "browser_loaded"
             ] = True
 
+
     # --------------------------------------------------------
-    # LocalStorage가 아직 로딩되지 않은 첫 실행
-    # 한 번 더 실행될 시간을 줌
+    # 두 번째 실행까지 값이 없으면
+    # 새 브라우저로 판단
     # --------------------------------------------------------
 
     elif (
-        storage_ready == "OK"
+        st.session_state[
+            "browser_read_count"
+        ] >= 2
     ):
 
         st.session_state[
-            "browser_data_loaded"
+            "browser_loaded"
         ] = True
+
+        current_text = json.dumps(
+            st.session_state.portfolio,
+            ensure_ascii=False,
+            sort_keys=True
+        )
+
+        st.session_state[
+            "last_saved_text"
+        ] = current_text
 
 
 # ============================================================
@@ -756,9 +819,11 @@ def refresh_quick_stocks():
         if widget_key in st.session_state:
 
             code = (
-                st.session_state[
-                    widget_key
-                ]
+                str(
+                    st.session_state[
+                        widget_key
+                    ]
+                )
                 .strip()
                 .upper()
             )
@@ -793,15 +858,15 @@ def refresh_quick_stocks():
 
             st.session_state.portfolio[
                 "quick_stocks"
-            ][i]["name"] = result[
-                "name"
-            ]
+            ][i]["name"] = (
+                result["name"]
+            )
 
             st.session_state.portfolio[
                 "quick_stocks"
-            ][i]["price"] = result[
-                "price"
-            ]
+            ][i]["price"] = (
+                result["price"]
+            )
 
             success += 1
 
@@ -811,9 +876,12 @@ def refresh_quick_stocks():
                 code
             )
 
-    save_data()
+    request_save()
 
-    return success, failed_codes
+    return (
+        success,
+        failed_codes
+    )
 
 
 # ============================================================
@@ -863,7 +931,7 @@ def refresh_account(account):
 
             success += 1
 
-    save_data()
+    request_save()
 
     return success
 
@@ -901,7 +969,7 @@ def refresh_all():
             account_success
         )
 
-    save_data()
+    request_save()
 
     return (
         total_success,
@@ -935,7 +1003,8 @@ def add_selected_to_account(
 
         stock
 
-        for stock in quick_stocks
+        for stock
+        in quick_stocks
 
         if stock.get(
             "selected",
@@ -946,10 +1015,12 @@ def add_selected_to_account(
     if not selected:
 
         st.warning(
-            "왼쪽 관심종목에서 추가할 종목을 선택해 주세요."
+            "왼쪽 관심종목에서 "
+            "추가할 종목을 선택해 주세요."
         )
 
         return
+
 
     for stock in selected:
 
@@ -961,11 +1032,16 @@ def add_selected_to_account(
         if not code:
             continue
 
+
+        # ----------------------------------------------------
         # 중복 체크
+        # ----------------------------------------------------
+
         exists = any(
 
             row.get(
-                "code"
+                "code",
+                ""
             ) == code
 
             for row
@@ -975,7 +1051,11 @@ def add_selected_to_account(
         if exists:
             continue
 
-        # 빈 행 찾기
+
+        # ----------------------------------------------------
+        # 빈 행 검색
+        # ----------------------------------------------------
+
         empty_index = None
 
         for i, row in enumerate(
@@ -989,15 +1069,19 @@ def add_selected_to_account(
                 empty_index = i
                 break
 
+
         if empty_index is None:
 
             st.warning(
                 f"{account}은 종목을 최대 "
-                f"{ACCOUNT_STOCKS}개까지 넣을 수 있습니다. "
-                f"{CASH_SLOT_NO}번째 칸은 현금잔고 전용입니다."
+                f"{ACCOUNT_STOCKS}개까지 "
+                f"넣을 수 있습니다. "
+                f"{CASH_SLOT_NO}번째 칸은 "
+                f"현금잔고 전용입니다."
             )
 
             break
+
 
         account_rows[
             empty_index
@@ -1025,14 +1109,19 @@ def add_selected_to_account(
                 )
         }
 
+
+    # --------------------------------------------------------
     # 체크 해제
+    # --------------------------------------------------------
+
     for stock in quick_stocks:
 
         stock[
             "selected"
         ] = False
 
-    save_data()
+
+    request_save()
 
 
 # ============================================================
@@ -1055,7 +1144,7 @@ def delete_account_stock(
         "current_price": 0
     }
 
-    save_data()
+    request_save()
 
 
 # ============================================================
@@ -1068,44 +1157,51 @@ def reset_all_data():
         make_default_data()
     )
 
-    # 위젯 session_state도 제거
-    delete_keys = []
+    # --------------------------------------------------------
+    # 입력 위젯 값 삭제
+    # --------------------------------------------------------
 
-    for key in st.session_state.keys():
+    remove_keys = []
+
+    for key in list(
+        st.session_state.keys()
+    ):
 
         if (
-            key.startswith("quick_code_")
-            or key.startswith("select_")
-            or key.startswith("buy_")
-            or key.startswith("qty_")
-            or key.startswith("cash_")
+            key.startswith(
+                "quick_code_"
+            )
+            or key.startswith(
+                "select_"
+            )
+            or key.startswith(
+                "buy_"
+            )
+            or key.startswith(
+                "qty_"
+            )
+            or key.startswith(
+                "cash_"
+            )
         ):
 
-            delete_keys.append(
+            remove_keys.append(
                 key
             )
 
-    for key in delete_keys:
+    for key in remove_keys:
 
-        del st.session_state[
-            key
-        ]
+        try:
 
-    save_server_data()
+            del st.session_state[
+                key
+            ]
 
-    try:
+        except:
+            pass
 
-        local_storage.setItem(
-            LOCAL_STORAGE_KEY,
-            json.dumps(
-                make_default_data(),
-                ensure_ascii=False
-            ),
-            key="portfolio_browser_reset"
-        )
 
-    except:
-        pass
+    request_save()
 
 
 # ============================================================
@@ -1122,111 +1218,47 @@ st.caption(
 
 
 # ============================================================
-# 전체 현재가 조회 / 초기화
+# 전체 현재가 조회
 # ============================================================
 
-top1, top2 = st.columns(
-    [0.78, 0.22]
-)
-
-with top1:
-
-    if st.button(
-        "🔄 전체 현재가 조회",
-        use_container_width=True,
-        type="primary"
-    ):
-
-        with st.spinner(
-            "현재가를 조회하고 있습니다..."
-        ):
-
-            success, failed_codes = (
-                refresh_all()
-            )
-
-        if success > 0:
-
-            st.success(
-                f"{success}개 종목의 현재가를 갱신했습니다."
-            )
-
-        if failed_codes:
-
-            st.warning(
-                "조회 실패 종목: "
-                + ", ".join(
-                    failed_codes
-                )
-            )
-
-        if (
-            success == 0
-            and not failed_codes
-        ):
-
-            st.warning(
-                "조회할 종목이 없습니다."
-            )
-
-        st.rerun()
-
-
-with top2:
-
-    if st.button(
-        "🗑️ 전체 초기화",
-        use_container_width=True
-    ):
-
-        st.session_state[
-            "show_reset_confirm"
-        ] = True
-
-
-# ============================================================
-# 초기화 확인
-# ============================================================
-
-if st.session_state.get(
-    "show_reset_confirm",
-    False
+if st.button(
+    "🔄 전체 현재가 조회",
+    use_container_width=True,
+    type="primary"
 ):
 
-    st.warning(
-        "관심종목, 계좌종목, 매수단가, 수량, 현금잔고가 모두 삭제됩니다."
-    )
+    with st.spinner(
+        "현재가를 조회하고 있습니다..."
+    ):
 
-    rc1, rc2 = st.columns(2)
+        success, failed_codes = (
+            refresh_all()
+        )
 
-    with rc1:
+    if success > 0:
 
-        if st.button(
-            "초기화 실행",
-            use_container_width=True,
-            type="primary"
-        ):
+        st.success(
+            f"{success}개 종목의 "
+            "현재가를 갱신했습니다."
+        )
 
-            reset_all_data()
+    if failed_codes:
 
-            st.session_state[
-                "show_reset_confirm"
-            ] = False
+        st.warning(
+            "조회 실패 종목: "
+            + ", ".join(
+                failed_codes
+            )
+        )
 
-            st.rerun()
+    if (
+        success == 0
+        and not failed_codes
+    ):
 
-    with rc2:
-
-        if st.button(
-            "취소",
-            use_container_width=True
-        ):
-
-            st.session_state[
-                "show_reset_confirm"
-            ] = False
-
-            st.rerun()
+        st.warning(
+            "조회할 종목이 없습니다."
+        )
 
 
 # ============================================================
@@ -1260,6 +1292,7 @@ with left_col:
             ][i]
         )
 
+
         # ----------------------------------------------------
         # 체크 + 종목코드
         # ----------------------------------------------------
@@ -1270,6 +1303,7 @@ with left_col:
                 gap="small"
             )
         )
+
 
         with col_check:
 
@@ -1286,6 +1320,7 @@ with left_col:
             stock[
                 "selected"
             ] = selected
+
 
         with col_code:
 
@@ -1308,6 +1343,7 @@ with left_col:
                 .upper()
             )
 
+
         # ----------------------------------------------------
         # 종목명 + 현재가격
         # ----------------------------------------------------
@@ -1319,13 +1355,12 @@ with left_col:
             )
         )
 
+
         with col_name:
 
-            stock_name = (
-                stock.get(
-                    "name",
-                    ""
-                )
+            stock_name = stock.get(
+                "name",
+                ""
             )
 
             if stock_name:
@@ -1351,6 +1386,7 @@ with left_col:
                     "</div>",
                     unsafe_allow_html=True
                 )
+
 
         with col_price:
 
@@ -1388,6 +1424,7 @@ with left_col:
                     unsafe_allow_html=True
                 )
 
+
         st.markdown(
             "<hr style='"
             "margin:2px 0 7px 0;"
@@ -1398,7 +1435,7 @@ with left_col:
 
 
 # ============================================================
-# 오른쪽 계좌
+# 오른쪽 계좌 포트폴리오
 # ============================================================
 
 with right_col:
@@ -1411,6 +1448,7 @@ with right_col:
         ACCOUNTS
     )
 
+
     for tab, account in zip(
         tabs,
         ACCOUNTS
@@ -1419,8 +1457,10 @@ with right_col:
         with tab:
 
             st.caption(
-                "1~4번은 보유종목, 5번은 현금잔고입니다."
+                "1~4번은 보유종목, "
+                "5번은 현금잔고입니다."
             )
+
 
             # =================================================
             # 버튼
@@ -1429,6 +1469,7 @@ with right_col:
             button1, button2 = (
                 st.columns(2)
             )
+
 
             with button1:
 
@@ -1442,7 +1483,6 @@ with right_col:
                         account
                     )
 
-                    st.rerun()
 
             with button2:
 
@@ -1453,14 +1493,14 @@ with right_col:
                 ):
 
                     with st.spinner(
-                        f"{account} 현재가 조회 중..."
+                        f"{account} "
+                        "현재가 조회 중..."
                     ):
 
                         refresh_account(
                             account
                         )
 
-                    st.rerun()
 
             # =================================================
             # 합계
@@ -1476,8 +1516,9 @@ with right_col:
                 ][account]
             )
 
+
             # =================================================
-            # 1~4번 주식
+            # 1~4번 보유주식
             # =================================================
 
             for i in range(
@@ -1485,6 +1526,7 @@ with right_col:
             ):
 
                 row = rows[i]
+
 
                 with st.container(
                     border=True
@@ -1495,6 +1537,7 @@ with right_col:
                             [0.82, 0.18]
                         )
                     )
+
 
                     # -----------------------------------------
                     # 종목명
@@ -1524,6 +1567,7 @@ with right_col:
                                 f"### {i + 1}. 빈 종목"
                             )
 
+
                     # -----------------------------------------
                     # 삭제
                     # -----------------------------------------
@@ -1549,13 +1593,13 @@ with right_col:
                                     i
                                 )
 
-                                st.rerun()
 
                     if not row.get(
                         "code"
                     ):
 
                         continue
+
 
                     # -----------------------------------------
                     # 매수단가 / 수량 / 현재가격
@@ -1566,6 +1610,7 @@ with right_col:
                             [1, 1, 1]
                         )
                     )
+
 
                     with c1:
 
@@ -1586,6 +1631,7 @@ with right_col:
                             )
                         )
 
+
                     with c2:
 
                         quantity_text = (
@@ -1604,6 +1650,7 @@ with right_col:
                                 )
                             )
                         )
+
 
                     with c3:
 
@@ -1632,8 +1679,9 @@ with right_col:
                                 "-"
                             )
 
+
                     # -----------------------------------------
-                    # 입력값 저장
+                    # 입력값
                     # -----------------------------------------
 
                     row[
@@ -1643,6 +1691,7 @@ with right_col:
                     row[
                         "quantity"
                     ] = quantity_text
+
 
                     # -----------------------------------------
                     # 계산
@@ -1683,8 +1732,9 @@ with right_col:
                         evaluation
                     )
 
+
                     # -----------------------------------------
-                    # 종목 결과
+                    # 종목 계산 결과
                     # -----------------------------------------
 
                     r1, r2, r3 = (
@@ -1714,7 +1764,7 @@ with right_col:
 
 
             # =================================================
-            # 5번째 : 현금잔고
+            # 5번째 현금잔고
             # =================================================
 
             with st.container(
@@ -1742,7 +1792,9 @@ with right_col:
 
                 st.session_state.portfolio[
                     "cash_balances"
-                ][account] = cash_text
+                ][account] = (
+                    cash_text
+                )
 
                 cash_balance = (
                     to_number(
@@ -1769,6 +1821,7 @@ with right_col:
                 + cash_balance
             )
 
+            # 현금은 손익 0원으로 계산
             total_base = (
                 total_buy
                 + cash_balance
@@ -1804,8 +1857,9 @@ with right_col:
                 st.columns(4)
             )
 
+
             # ------------------------------------------------
-            # 주식 매수총금액
+            # 매수총금액
             # ------------------------------------------------
 
             with s1:
@@ -1823,6 +1877,7 @@ with right_col:
                     f'</div>',
                     unsafe_allow_html=True
                 )
+
 
             # ------------------------------------------------
             # 현재평가금액 + 현금
@@ -1843,6 +1898,7 @@ with right_col:
                     f'</div>',
                     unsafe_allow_html=True
                 )
+
 
             # ------------------------------------------------
             # 손익 색상
@@ -1866,6 +1922,7 @@ with right_col:
                     "profit-zero"
                 )
 
+
             # ------------------------------------------------
             # 현재손익
             # ------------------------------------------------
@@ -1885,6 +1942,7 @@ with right_col:
                     f'</div>',
                     unsafe_allow_html=True
                 )
+
 
             # ------------------------------------------------
             # 전체 수익률
@@ -1908,7 +1966,7 @@ with right_col:
 
 
 # ============================================================
-# 변경 데이터 자동 저장
+# 데이터 변경 여부 확인
 # ============================================================
 
 current_save_text = json.dumps(
@@ -1919,23 +1977,66 @@ current_save_text = json.dumps(
 
 previous_save_text = (
     st.session_state.get(
-        "last_saved_portfolio",
+        "last_saved_text",
         ""
     )
 )
 
+
+# ============================================================
+# 입력 내용이 변경되면 저장 요청
+# ============================================================
+
 if (
-    st.session_state.get(
-        "browser_data_loaded",
-        False
-    )
+    st.session_state[
+        "browser_loaded"
+    ]
     and
     current_save_text
     != previous_save_text
 ):
 
-    save_data()
-
     st.session_state[
-        "last_saved_portfolio"
-    ] = current_save_text
+        "browser_save_needed"
+    ] = True
+
+    save_server_data()
+
+
+# ============================================================
+# Safari LocalStorage 저장
+#
+# 중요:
+# setItem은 전체 프로그램에서
+# 이곳에서 단 한 번만 실행
+# ============================================================
+
+if (
+    st.session_state[
+        "browser_loaded"
+    ]
+    and
+    st.session_state[
+        "browser_save_needed"
+    ]
+):
+
+    try:
+
+        local_storage.setItem(
+            LOCAL_STORAGE_KEY,
+            current_save_text,
+            key="portfolio_browser_save"
+        )
+
+        st.session_state[
+            "last_saved_text"
+        ] = current_save_text
+
+        st.session_state[
+            "browser_save_needed"
+        ] = False
+
+    except Exception:
+
+        pass
