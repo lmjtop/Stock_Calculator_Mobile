@@ -1,9 +1,9 @@
 import streamlit as st
 import requests
 import json
-import os
+from datetime import datetime, timezone
 
-from streamlit_local_storage import LocalStorage
+from supabase import create_client
 
 
 # ============================================================
@@ -21,20 +21,8 @@ ACCOUNTS = [
     "연금저축"
 ]
 
-BASE_DIR = os.path.dirname(
-    os.path.abspath(__file__)
-)
-
-# 서버 임시 백업용
-SAVE_FILE = os.path.join(
-    BASE_DIR,
-    "portfolio_mobile.json"
-)
-
-# 아이폰 Safari LocalStorage 저장 KEY
-LOCAL_STORAGE_KEY = (
-    "stock_calculator_portfolio_v1"
-)
+# Supabase에 저장할 포트폴리오 ID
+PORTFOLIO_ID = "main"
 
 
 # ============================================================
@@ -47,13 +35,6 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed"
 )
-
-
-# ============================================================
-# LocalStorage
-# ============================================================
-
-local_storage = LocalStorage()
 
 
 # ============================================================
@@ -124,6 +105,53 @@ st.markdown(
     """,
     unsafe_allow_html=True
 )
+
+
+# ============================================================
+# Supabase 연결
+# ============================================================
+
+@st.cache_resource
+def get_supabase():
+
+    try:
+
+        supabase_url = st.secrets[
+            "SUPABASE_URL"
+        ]
+
+        supabase_key = st.secrets[
+            "SUPABASE_KEY"
+        ]
+
+        return create_client(
+            supabase_url,
+            supabase_key
+        )
+
+    except Exception:
+
+        return None
+
+
+supabase = get_supabase()
+
+
+# ============================================================
+# Supabase 설정 확인
+# ============================================================
+
+if supabase is None:
+
+    st.error(
+        "Supabase 연결정보가 없습니다.\n\n"
+        "Streamlit Cloud → Settings → Secrets에\n\n"
+        'SUPABASE_URL = \"...\" \n'
+        'SUPABASE_KEY = \"...\" \n\n'
+        "를 등록해 주세요."
+    )
+
+    st.stop()
 
 
 # ============================================================
@@ -223,7 +251,7 @@ def format_rate(value):
 
 
 # ============================================================
-# JSON 요청
+# 네이버 JSON 요청
 # ============================================================
 
 def request_json(url):
@@ -255,7 +283,9 @@ def get_domestic_stock(stock_code):
         f"api/stock/{stock_code}/basic"
     )
 
-    data = request_json(url)
+    data = request_json(
+        url
+    )
 
     if not data:
         return None
@@ -373,7 +403,7 @@ def get_stock_price(stock_code):
         if result:
             return result
 
-    # 영문 포함 : 미국주식
+    # 영문 포함 → 미국주식
     if any(
         c.isalpha()
         for c in code
@@ -454,7 +484,6 @@ def normalize_data(data):
         data,
         dict
     ):
-
         return default
 
 
@@ -471,7 +500,6 @@ def normalize_data(data):
         quick,
         list
     ):
-
         quick = []
 
     while len(quick) < QUICK_STOCKS:
@@ -505,7 +533,6 @@ def normalize_data(data):
         saved_accounts,
         dict
     ):
-
         saved_accounts = {}
 
     for account in ACCOUNTS:
@@ -519,7 +546,6 @@ def normalize_data(data):
             rows,
             list
         ):
-
             rows = []
 
         while len(rows) < ACCOUNT_STOCKS:
@@ -554,7 +580,6 @@ def normalize_data(data):
         saved_cash,
         dict
     ):
-
         saved_cash = {}
 
     for account in ACCOUNTS:
@@ -572,231 +597,131 @@ def normalize_data(data):
 
 
 # ============================================================
-# 서버 JSON 불러오기
+# Supabase 데이터 불러오기
 # ============================================================
 
-def load_server_data():
-
-    if not os.path.exists(
-        SAVE_FILE
-    ):
-
-        return make_default_data()
+def load_data():
 
     try:
 
-        with open(
-            SAVE_FILE,
-            "r",
-            encoding="utf-8"
-        ) as file:
-
-            data = json.load(
-                file
+        response = (
+            supabase
+            .table(
+                "stock_portfolio"
             )
-
-        return normalize_data(
-            data
+            .select(
+                "data"
+            )
+            .eq(
+                "id",
+                PORTFOLIO_ID
+            )
+            .limit(
+                1
+            )
+            .execute()
         )
 
-    except:
+        if (
+            response.data
+            and len(response.data) > 0
+        ):
 
-        return make_default_data()
+            data = (
+                response.data[0]
+                .get(
+                    "data",
+                    {}
+                )
+            )
+
+            return normalize_data(
+                data
+            )
+
+    except Exception as e:
+
+        st.error(
+            f"Supabase 데이터 불러오기 오류: {e}"
+        )
+
+    return make_default_data()
 
 
 # ============================================================
-# 서버 JSON 저장
+# Supabase 데이터 저장
 # ============================================================
 
-def save_server_data():
+def save_data(
+    show_error=False
+):
 
     try:
 
-        with open(
-            SAVE_FILE,
-            "w",
-            encoding="utf-8"
-        ) as file:
+        payload = {
 
-            json.dump(
+            "id":
+                PORTFOLIO_ID,
+
+            "data":
                 st.session_state.portfolio,
-                file,
-                ensure_ascii=False,
-                indent=4
+
+            "updated_at":
+                datetime.now(
+                    timezone.utc
+                ).isoformat()
+        }
+
+        (
+            supabase
+            .table(
+                "stock_portfolio"
             )
-
-    except:
-        pass
-
-
-# ============================================================
-# 저장 요청 표시
-#
-# 브라우저 LocalStorage는 바로 쓰지 않고
-# 화면 마지막에서 딱 한 번만 저장
-# ============================================================
-
-def request_save():
-
-    save_server_data()
-
-    st.session_state[
-        "browser_save_needed"
-    ] = True
-
-
-# ============================================================
-# Session 기본값
-# ============================================================
-
-if "portfolio" not in st.session_state:
-
-    st.session_state.portfolio = (
-        load_server_data()
-    )
-
-
-if (
-    "browser_save_needed"
-    not in st.session_state
-):
-
-    st.session_state[
-        "browser_save_needed"
-    ] = False
-
-
-if (
-    "browser_loaded"
-    not in st.session_state
-):
-
-    st.session_state[
-        "browser_loaded"
-    ] = False
-
-
-if (
-    "browser_read_count"
-    not in st.session_state
-):
-
-    st.session_state[
-        "browser_read_count"
-    ] = 0
-
-
-if (
-    "last_saved_text"
-    not in st.session_state
-):
-
-    st.session_state[
-        "last_saved_text"
-    ] = ""
-
-
-# ============================================================
-# Safari LocalStorage 읽기
-#
-# 중요:
-# getItem은 이 한 곳에서만 실행
-# ============================================================
-
-browser_data = local_storage.getItem(
-    LOCAL_STORAGE_KEY,
-    key="portfolio_browser_load"
-)
-
-
-# ============================================================
-# LocalStorage 최초 복원
-# ============================================================
-
-if not st.session_state[
-    "browser_loaded"
-]:
-
-    st.session_state[
-        "browser_read_count"
-    ] += 1
-
-    # --------------------------------------------------------
-    # Safari에 기존 저장값이 있는 경우
-    # --------------------------------------------------------
-
-    if browser_data:
-
-        try:
-
-            if isinstance(
-                browser_data,
-                str
-            ):
-
-                loaded_data = json.loads(
-                    browser_data
-                )
-
-            else:
-
-                loaded_data = (
-                    browser_data
-                )
-
-            st.session_state.portfolio = (
-                normalize_data(
-                    loaded_data
-                )
+            .upsert(
+                payload,
+                on_conflict="id"
             )
-
-            st.session_state[
-                "browser_loaded"
-            ] = True
-
-            current_text = json.dumps(
-                st.session_state.portfolio,
-                ensure_ascii=False,
-                sort_keys=True
-            )
-
-            st.session_state[
-                "last_saved_text"
-            ] = current_text
-
-            save_server_data()
-
-        except:
-
-            st.session_state[
-                "browser_loaded"
-            ] = True
-
-
-    # --------------------------------------------------------
-    # 두 번째 실행까지 값이 없으면
-    # 새 브라우저로 판단
-    # --------------------------------------------------------
-
-    elif (
-        st.session_state[
-            "browser_read_count"
-        ] >= 2
-    ):
+            .execute()
+        )
 
         st.session_state[
-            "browser_loaded"
-        ] = True
-
-        current_text = json.dumps(
+            "last_saved_data"
+        ] = json.dumps(
             st.session_state.portfolio,
             ensure_ascii=False,
             sort_keys=True
         )
 
-        st.session_state[
-            "last_saved_text"
-        ] = current_text
+        return True
+
+    except Exception as e:
+
+        if show_error:
+
+            st.error(
+                f"Supabase 저장 오류: {e}"
+            )
+
+        return False
+
+
+# ============================================================
+# Session 초기화
+# ============================================================
+
+if "portfolio" not in st.session_state:
+
+    st.session_state.portfolio = (
+        load_data()
+    )
+
+    st.session_state[
+        "last_saved_data"
+    ] = json.dumps(
+        st.session_state.portfolio,
+        ensure_ascii=False,
+        sort_keys=True
+    )
 
 
 # ============================================================
@@ -876,8 +801,6 @@ def refresh_quick_stocks():
                 code
             )
 
-    request_save()
-
     return (
         success,
         failed_codes
@@ -919,9 +842,11 @@ def refresh_account(account):
 
         if result:
 
-            row["name"] = (
-                result["name"]
-            )
+            row[
+                "name"
+            ] = result[
+                "name"
+            ]
 
             row[
                 "current_price"
@@ -930,8 +855,6 @@ def refresh_account(account):
             ]
 
             success += 1
-
-    request_save()
 
     return success
 
@@ -959,17 +882,13 @@ def refresh_all():
 
     for account in ACCOUNTS:
 
-        account_success = (
+        total_success += (
             refresh_account(
                 account
             )
         )
 
-        total_success += (
-            account_success
-        )
-
-    request_save()
+    save_data()
 
     return (
         total_success,
@@ -1003,8 +922,7 @@ def add_selected_to_account(
 
         stock
 
-        for stock
-        in quick_stocks
+        for stock in quick_stocks
 
         if stock.get(
             "selected",
@@ -1033,10 +951,7 @@ def add_selected_to_account(
             continue
 
 
-        # ----------------------------------------------------
         # 중복 체크
-        # ----------------------------------------------------
-
         exists = any(
 
             row.get(
@@ -1044,18 +959,14 @@ def add_selected_to_account(
                 ""
             ) == code
 
-            for row
-            in account_rows
+            for row in account_rows
         )
 
         if exists:
             continue
 
 
-        # ----------------------------------------------------
-        # 빈 행 검색
-        # ----------------------------------------------------
-
+        # 빈 행 찾기
         empty_index = None
 
         for i, row in enumerate(
@@ -1110,10 +1021,7 @@ def add_selected_to_account(
         }
 
 
-    # --------------------------------------------------------
     # 체크 해제
-    # --------------------------------------------------------
-
     for stock in quick_stocks:
 
         stock[
@@ -1121,7 +1029,7 @@ def add_selected_to_account(
         ] = False
 
 
-    request_save()
+    save_data()
 
 
 # ============================================================
@@ -1144,64 +1052,27 @@ def delete_account_stock(
         "current_price": 0
     }
 
-    request_save()
-
-
-# ============================================================
-# 전체 데이터 초기화
-# ============================================================
-
-def reset_all_data():
-
-    st.session_state.portfolio = (
-        make_default_data()
+    buy_key = (
+        f"buy_{account}_{index}"
     )
 
-    # --------------------------------------------------------
-    # 입력 위젯 값 삭제
-    # --------------------------------------------------------
+    qty_key = (
+        f"qty_{account}_{index}"
+    )
 
-    remove_keys = []
+    if buy_key in st.session_state:
 
-    for key in list(
-        st.session_state.keys()
-    ):
+        del st.session_state[
+            buy_key
+        ]
 
-        if (
-            key.startswith(
-                "quick_code_"
-            )
-            or key.startswith(
-                "select_"
-            )
-            or key.startswith(
-                "buy_"
-            )
-            or key.startswith(
-                "qty_"
-            )
-            or key.startswith(
-                "cash_"
-            )
-        ):
+    if qty_key in st.session_state:
 
-            remove_keys.append(
-                key
-            )
+        del st.session_state[
+            qty_key
+        ]
 
-    for key in remove_keys:
-
-        try:
-
-            del st.session_state[
-                key
-            ]
-
-        except:
-            pass
-
-
-    request_save()
+    save_data()
 
 
 # ============================================================
@@ -1358,9 +1229,11 @@ with left_col:
 
         with col_name:
 
-            stock_name = stock.get(
-                "name",
-                ""
+            stock_name = (
+                stock.get(
+                    "name",
+                    ""
+                )
             )
 
             if stock_name:
@@ -1483,6 +1356,8 @@ with right_col:
                         account
                     )
 
+                    st.rerun()
+
 
             with button2:
 
@@ -1501,6 +1376,10 @@ with right_col:
                             account
                         )
 
+                        save_data()
+
+                    st.rerun()
+
 
             # =================================================
             # 합계
@@ -1518,7 +1397,7 @@ with right_col:
 
 
             # =================================================
-            # 1~4번 보유주식
+            # 1~4번 주식
             # =================================================
 
             for i in range(
@@ -1592,6 +1471,8 @@ with right_col:
                                     account,
                                     i
                                 )
+
+                                st.rerun()
 
 
                     if not row.get(
@@ -1681,7 +1562,7 @@ with right_col:
 
 
                     # -----------------------------------------
-                    # 입력값
+                    # 입력값 저장
                     # -----------------------------------------
 
                     row[
@@ -1734,7 +1615,7 @@ with right_col:
 
 
                     # -----------------------------------------
-                    # 종목 계산 결과
+                    # 종목 결과
                     # -----------------------------------------
 
                     r1, r2, r3 = (
@@ -1764,7 +1645,7 @@ with right_col:
 
 
             # =================================================
-            # 5번째 현금잔고
+            # 5번째 : 현금잔고
             # =================================================
 
             with st.container(
@@ -1792,9 +1673,7 @@ with right_col:
 
                 st.session_state.portfolio[
                     "cash_balances"
-                ][account] = (
-                    cash_text
-                )
+                ][account] = cash_text
 
                 cash_balance = (
                     to_number(
@@ -1821,12 +1700,13 @@ with right_col:
                 + cash_balance
             )
 
-            # 현금은 손익 0원으로 계산
+            # 주식 매수금액 + 현금
             total_base = (
                 total_buy
                 + cash_balance
             )
 
+            # 현금은 손익 0
             total_profit = (
                 total_evaluation_with_cash
                 - total_base
@@ -1846,7 +1726,7 @@ with right_col:
 
 
             # =================================================
-            # 계좌 합계 표시
+            # 계좌 합계
             # =================================================
 
             st.markdown(
@@ -1857,10 +1737,6 @@ with right_col:
                 st.columns(4)
             )
 
-
-            # ------------------------------------------------
-            # 매수총금액
-            # ------------------------------------------------
 
             with s1:
 
@@ -1878,10 +1754,6 @@ with right_col:
                     unsafe_allow_html=True
                 )
 
-
-            # ------------------------------------------------
-            # 현재평가금액 + 현금
-            # ------------------------------------------------
 
             with s2:
 
@@ -1923,10 +1795,6 @@ with right_col:
                 )
 
 
-            # ------------------------------------------------
-            # 현재손익
-            # ------------------------------------------------
-
             with s3:
 
                 st.markdown(
@@ -1943,10 +1811,6 @@ with right_col:
                     unsafe_allow_html=True
                 )
 
-
-            # ------------------------------------------------
-            # 전체 수익률
-            # ------------------------------------------------
 
             with s4:
 
@@ -1966,77 +1830,25 @@ with right_col:
 
 
 # ============================================================
-# 데이터 변경 여부 확인
+# 변경된 데이터 자동 저장
 # ============================================================
 
-current_save_text = json.dumps(
+current_data_text = json.dumps(
     st.session_state.portfolio,
     ensure_ascii=False,
     sort_keys=True
 )
 
-previous_save_text = (
+last_saved_data = (
     st.session_state.get(
-        "last_saved_text",
+        "last_saved_data",
         ""
     )
 )
 
-
-# ============================================================
-# 입력 내용이 변경되면 저장 요청
-# ============================================================
-
 if (
-    st.session_state[
-        "browser_loaded"
-    ]
-    and
-    current_save_text
-    != previous_save_text
+    current_data_text
+    != last_saved_data
 ):
 
-    st.session_state[
-        "browser_save_needed"
-    ] = True
-
-    save_server_data()
-
-
-# ============================================================
-# Safari LocalStorage 저장
-#
-# 중요:
-# setItem은 전체 프로그램에서
-# 이곳에서 단 한 번만 실행
-# ============================================================
-
-if (
-    st.session_state[
-        "browser_loaded"
-    ]
-    and
-    st.session_state[
-        "browser_save_needed"
-    ]
-):
-
-    try:
-
-        local_storage.setItem(
-            LOCAL_STORAGE_KEY,
-            current_save_text,
-            key="portfolio_browser_save"
-        )
-
-        st.session_state[
-            "last_saved_text"
-        ] = current_save_text
-
-        st.session_state[
-            "browser_save_needed"
-        ] = False
-
-    except Exception:
-
-        pass
+    save_data()
