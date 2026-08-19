@@ -1,3 +1,3 @@
 streamlit
 requests
-streamlit-local-storage==0.0.25
+supabase
