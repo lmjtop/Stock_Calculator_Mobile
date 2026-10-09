@@ -600,128 +600,120 @@ def normalize_data(data):
 # Supabase 데이터 불러오기
 # ============================================================
 
+def validate_saved_data(data):
+    # Never silently replace an unreadable portfolio with empty defaults.
+    if not isinstance(data, dict):
+        raise ValueError("저장된 데이터가 올바른 객체 형식이 아닙니다.")
+    for key, kind in (("quick_stocks", list), ("accounts", dict),
+                      ("cash_balances", dict)):
+        if key not in data or not isinstance(data[key], kind):
+            raise ValueError(f"저장된 {key} 데이터 형식을 확인해 주세요.")
+    if len(data["quick_stocks"]) > QUICK_STOCKS:
+        raise ValueError("저장된 관심종목 수가 화면의 최대 개수를 초과합니다.")
+    if any(not isinstance(row, dict) for row in data["quick_stocks"]):
+        raise ValueError("관심종목 데이터가 손상되었습니다.")
+    if set(data["accounts"]) - set(ACCOUNTS):
+        raise ValueError("화면에서 지원하지 않는 계좌가 있습니다.")
+    for rows in data["accounts"].values():
+        if (not isinstance(rows, list) or len(rows) > ACCOUNT_STOCKS
+                or any(not isinstance(row, dict) for row in rows)):
+            raise ValueError("계좌 종목 데이터가 손상되었거나 개수를 초과합니다.")
+    return normalize_data(data)
+
+
 def load_data():
-
-    try:
-
-        response = (
-            supabase
-            .table(
-                "stock_portfolio"
-            )
-            .select(
-                "data"
-            )
-            .eq(
-                "id",
-                PORTFOLIO_ID
-            )
-            .limit(
-                1
-            )
-            .execute()
-        )
-
-        if (
-            response.data
-            and len(response.data) > 0
-        ):
-
-            data = (
-                response.data[0]
-                .get(
-                    "data",
-                    {}
-                )
-            )
-
-            return normalize_data(
-                data
-            )
-
-    except Exception as e:
-
-        st.error(
-            f"Supabase 데이터 불러오기 오류: {e}"
-        )
-
+    response = (supabase.table("stock_portfolio")
+                .select("data,updated_at").eq("id", PORTFOLIO_ID)
+                .limit(1).execute())
+    if response.data:
+        row = response.data[0]
+        portfolio = validate_saved_data(row.get("data"))
+        st.session_state["portfolio_exists"] = True
+        st.session_state["portfolio_version"] = row.get("updated_at")
+        return portfolio
+    # An empty query may also indicate missing read permissions. Do not upsert:
+    # insert will fail safely if an existing row is hidden by database policies.
+    st.session_state["portfolio_exists"] = False
+    st.session_state["portfolio_version"] = None
     return make_default_data()
 
 
-# ============================================================
-# Supabase 데이터 저장
-# ============================================================
-
-def save_data(
-    show_error=False
-):
-
-    try:
-
-        payload = {
-
-            "id":
-                PORTFOLIO_ID,
-
-            "data":
-                st.session_state.portfolio,
-
-            "updated_at":
-                datetime.now(
-                    timezone.utc
-                ).isoformat()
-        }
-
-        (
-            supabase
-            .table(
-                "stock_portfolio"
-            )
-            .upsert(
-                payload,
-                on_conflict="id"
-            )
-            .execute()
-        )
-
-        st.session_state[
-            "last_saved_data"
-        ] = json.dumps(
-            st.session_state.portfolio,
-            ensure_ascii=False,
-            sort_keys=True
-        )
-
+def save_data(show_error=True):
+    if st.session_state.get("save_blocked"):
+        st.error("저장이 차단되어 있습니다. 백업 후 최신 데이터를 불러와 주세요.")
+        st.stop()
+    serialized = json.dumps(st.session_state.portfolio,
+                            ensure_ascii=False, sort_keys=True)
+    if serialized == st.session_state.get("last_saved_data"):
         return True
+    try:
+        validate_saved_data(json.loads(serialized))
+        version = datetime.now(timezone.utc).isoformat()
+        # Take a detached snapshot; do not pass mutable session state to the DB.
+        payload = {"data": json.loads(serialized), "updated_at": version}
+        if st.session_state["portfolio_exists"]:
+            # Atomic compare-and-swap in the database: only the version this
+            # browser originally loaded may be replaced. No check-then-upsert.
+            query = (supabase.table("stock_portfolio").update(payload)
+                     .eq("id", PORTFOLIO_ID))
+            previous = st.session_state.get("portfolio_version")
+            query = (query.is_("updated_at", "null") if previous is None
+                     else query.eq("updated_at", previous))
+            response = query.execute()
+        else:
+            response = (supabase.table("stock_portfolio")
+                        .insert({"id": PORTFOLIO_ID, **payload}).execute())
+        if not response.data or len(response.data) != 1:
+            st.session_state["save_blocked"] = True
+            st.error("다른 기기에서 데이터가 변경되었거나 저장 권한이 없습니다. "
+                     "현재 입력값은 덮어쓰지 않았습니다. 아래 백업을 받은 뒤 "
+                     "최신 데이터를 불러와 주세요.")
+            recovery_controls("_failure")
+            st.stop()
+        st.session_state["portfolio_exists"] = True
+        st.session_state["portfolio_version"] = response.data[0]["updated_at"]
+        st.session_state["last_saved_data"] = serialized
+        st.session_state["save_status"] = "저장 완료 · " + version
+        return True
+    except Exception:
+        # A timeout may occur after the DB committed. Block further writes until
+        # reload rather than retrying with a stale version or pretending success.
+        st.session_state["save_blocked"] = True
+        st.error("저장을 확인하지 못했습니다. 현재 입력값을 백업한 뒤 "
+                 "최신 데이터를 불러와 주세요. 연결 및 DB 권한도 확인해 주세요.")
+        recovery_controls("_failure")
+        st.stop()
 
-    except Exception as e:
 
-        if show_error:
+def recovery_controls(suffix=""):
+    if "portfolio" in st.session_state:
+        st.download_button(
+            "현재 화면 데이터 백업 (JSON)",
+            json.dumps(st.session_state.portfolio, ensure_ascii=False, indent=2),
+            file_name="stock_portfolio_backup.json", mime="application/json",
+            key="portfolio_backup" + suffix, on_click="ignore")
+    if st.button("최신 데이터 불러오기", key="reload_portfolio" + suffix):
+        # Widget values must also be reset or they overwrite the reloaded data.
+        st.session_state.clear()
+        st.rerun()
+    st.caption("불러오면 이 화면의 미저장 입력값은 사라집니다. 필요한 경우 먼저 백업하세요.")
 
-            st.error(
-                f"Supabase 저장 오류: {e}"
-            )
-
-        return False
-
-
-# ============================================================
-# Session 초기화
-# ============================================================
 
 if "portfolio" not in st.session_state:
+    try:
+        st.session_state.portfolio = load_data()
+        st.session_state["last_saved_data"] = json.dumps(
+            st.session_state.portfolio, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        st.error("저장된 데이터를 불러오지 못했습니다. 기존 데이터 보호를 위해 "
+                 "입력과 저장을 중단했습니다. 연결 및 DB 읽기 권한을 확인해 주세요.")
+        recovery_controls("_failure")
+        st.stop()
 
-    st.session_state.portfolio = (
-        load_data()
-    )
-
-    st.session_state[
-        "last_saved_data"
-    ] = json.dumps(
-        st.session_state.portfolio,
-        ensure_ascii=False,
-        sort_keys=True
-    )
+recovery_controls()
+if st.session_state.get("save_blocked"):
+    st.warning("미저장 상태입니다. 백업 후 최신 데이터를 불러와 주세요.")
+    st.stop()
 
 
 # ============================================================
@@ -1852,3 +1844,6 @@ if (
 ):
 
     save_data()
+
+if st.session_state.get("save_status"):
+    st.caption(st.session_state["save_status"])
